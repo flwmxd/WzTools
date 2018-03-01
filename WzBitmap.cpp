@@ -1,3 +1,21 @@
+//////////////////////////////////////////////////////////////////////////////
+// This file is part of the PharaohStroy MMORPG client                      // 
+// Copyright ?2016-2017 Prime Zeng                                          // 
+//                                                                          // 
+// This program is free software: you can redistribute it and/or modify     // 
+// it under the terms of the GNU Affero General Public License as           // 
+// published by the Free Software Foundation, either version 3 of the       // 
+// License, or (at your option) any later version.                          // 
+//                                                                          // 
+// This program is distributed in the hope that it will be useful,          // 
+// but WITHOUT ANY WARRANTY; without even the implied warranty of           // 
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the            // 
+// GNU Affero General Public License for more details.                      // 
+//                                                                          // 
+// You should have received a copy of the GNU Affero General Public License // 
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.    // 
+////////////////////////////////////////////////////////////////////////////// 
+
 #include "WzBitmap.h"
 #include <zlib.h>
 #include "../Others/Console.h"
@@ -8,6 +26,12 @@
 #endif
 #include <algorithm>
 
+#define RGB_PREMULTIPLY_ALPHA(vr, vg, vb, va) \
+    (unsigned)(((unsigned)((unsigned char)(vr) * ((unsigned char)(va) + 1)) >> 8) | \
+    ((unsigned)((unsigned char)(vg) * ((unsigned char)(va) + 1) >> 8) << 8) | \
+    ((unsigned)((unsigned char)(vb) * ((unsigned char)(va) + 1) >> 8) << 16) | \
+    ((unsigned)(unsigned char)(va) << 24))
+
 uint8_t const table4[0x10] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
 uint8_t const table5[0x20] = { 0x00, 0x08, 0x10, 0x19, 0x21, 0x29, 0x31, 0x3A, 0x42, 0x4A, 0x52,
@@ -17,7 +41,8 @@ uint8_t const table6[0x40] = {
 	0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28, 0x2D, 0x31, 0x35, 0x39, 0x3D,
 	0x41, 0x45, 0x49, 0x4D, 0x51, 0x55, 0x59, 0x5D, 0x61, 0x65, 0x69, 0x6D, 0x71, 0x75, 0x79, 0x7D,
 	0x82, 0x86, 0x8A, 0x8E, 0x92, 0x96, 0x9A, 0x9E, 0xA2, 0xA6, 0xAA, 0xAE, 0xB2, 0xB6, 0xBA, 0xBE,
-	0xC2, 0xC6, 0xCA, 0xCE, 0xD2, 0xD7, 0xDB, 0xDF, 0xE3, 0xE7, 0xEB, 0xEF, 0xF3, 0xF7, 0xFB, 0xFF };
+	0xC2, 0xC6, 0xCA, 0xCE, 0xD2, 0xD7, 0xDB, 0xDF, 0xE3, 0xE7, 0xEB, 0xEF, 0xF3, 0xF7, 0xFB, 0xFF 
+};
 template <int N> void scale(std::vector<uint8_t> const & input, std::vector<uint8_t> & output, int width, int height) {
 	auto in = reinterpret_cast<uint32_t const *>(input.data());
 	auto out = reinterpret_cast<uint32_t *>(output.data());
@@ -37,11 +62,18 @@ template <int N> void scale(std::vector<uint8_t> const & input, std::vector<uint
 
 WzBitmap::WzBitmap()
 {
-
+	height = 0;
+	width = 0;
+	length = 0;
+	offset = 0;
+	format = 0;
+	format2 = 0;
+	reader = nullptr;
 }
 
 
-WzBitmap::WzBitmap(int32_t h, int32_t w, uint32_t len, int32_t o, int32_t f, uint8_t f2, std::shared_ptr<WzReader> r) :height(h), width(w), length(len), offset(o), format(f), format2(f2), reader(r)
+WzBitmap::WzBitmap(int32_t h, int32_t w, uint32_t len, int32_t o, int32_t f, uint8_t f2, std::shared_ptr<WzReader> r) 
+	:height(h), width(w), length(len), offset(o), format(f), format2(f2), reader(r)
 {
 
 }
@@ -66,77 +98,25 @@ auto WzBitmap::getHeight() const -> int32_t
 	return height;
 }
 
+auto WzBitmap::setWidth(int32_t width) -> void
+{
+	this->width = width;
+}
+
+
+
 auto WzBitmap::content() const ->byte*
 {
 	reader->setPosition(offset + 1);
 	return reader->readBytes(length);
 }
 
-auto WzBitmap::png() -> byte *
+
+auto WzBitmap::data() ->std::vector<uint8_t>&
 {
-	switch (this->format)
-	{
-	case 1:
-	case 0x201:
-		deCompressLen = (height * width) * 2; //*2
-		break;
-	case 2:
-		deCompressLen = (height * width) * 4;//*4
-		break;
-	case 0x205:
-		deCompressLen = (height * width) / 8;
-		break;
-	default:
-		return nullptr;
+	if (input.size() > 0) {
+		return input;
 	}
-	ByteArrayOutputStream stream(length);
-	ByteArrayOutputStream st;
-	reader->setPosition(offset + 1);
-	/*这里已经解决*/
-	if (reader->readUShort() == 0x9c78) {
-		reader->setPosition(offset + 1);
-		byte * readB = reader->readBytes(length);
-		stream.write(readB, 0, length);
-		delete[] readB;
-		byte * bb = stream.toArray();
-		st.write(bb, 0, stream.getLength());
-		delete[]bb;
-	}
-	else {
-		/*流的读取OK  2015/8/16 02:49！！！！！！*/
-		reader->setPosition(offset + 1);
-		while (reader->getPosition() < offset + length)
-		{
-			int blocksize = reader->readInt();
-			byte * b = reader->decryptBytes(reader->readBytes(blocksize), blocksize);
-			stream.write(b, 0, blocksize);
-			delete[] b;
-		}
-		byte * bb = stream.toArray();
-		st.write(bb, 0, stream.getLength());
-		delete[]bb;
-	}
-
-	byte *deBuf = new byte[deCompressLen];
-	/*
-	#define Z_OK            0
-	#define Z_STREAM_END    1
-	#define Z_NEED_DICT     2
-	#define Z_ERRNO        (-1)
-	#define Z_STREAM_ERROR (-2)
-	#define Z_DATA_ERROR   (-3)
-	#define Z_MEM_ERROR    (-4)
-	#define Z_BUF_ERROR    (-5)
-	#define Z_VERSION_ERROR (-6)
-	*/
-	int a = uncompress(deBuf, &deCompressLen, st.toArray(), st.getLength());
-
-	return render(deBuf);
-}
-
-auto WzBitmap::data() ->std::vector<uint8_t>
-{
-	std::vector<uint8_t> input;
 	std::vector<uint8_t> output;
 	auto size = width * height * 4;
 	auto biggest = std::max(static_cast<uint32_t>(size), length);
@@ -163,7 +143,6 @@ auto WzBitmap::data() ->std::vector<uint8_t>
 
 		return true;
 	};
-
 	auto decrypt = [&] {
 		auto p = 0u;
 		for (auto i = 0u; i <= length - 4;) {
@@ -189,7 +168,7 @@ auto WzBitmap::data() ->std::vector<uint8_t>
 		format = 2;
 		format2 = 0;
 		decompressed = size;
-		std::fill(output.begin(), output.begin() + size, '\0');
+		std::fill(output.begin(), output.begin() + size, 0);
 	}
 	input.swap(output);
 
@@ -232,24 +211,28 @@ auto WzBitmap::data() ->std::vector<uint8_t>
 	}
 	if (check != pixels * 4) {
 		std::cerr << "Size mismatch: " << std::dec << width << "," << height << "," << decompressed << "," << format << "," << format2 << std::endl;
-		throw std::runtime_error("halp!");
+		//throw std::runtime_error("halp!");
 	}
 
 	switch (format) {
 	case 1:
 		for (auto i = 0; i < pixels; ++i) {
 			auto p = pixels4444[i];
-			pixelsout[i] = { table4[p.b], table4[p.g], table4[p.r], table4[p.a] };
+			pixelsout[i] = { table4[p.r], table4[p.g], table4[p.b], table4[p.a]};
 		}
 		input.swap(output);
 		break;
 	case 2:
+
+	
+		//memcpy(pixelsout, input.data(), pixels);
+		//input.swap(output);
 		// Do nothing
 		break;
 	case 513:
 		for (auto i = 0; i < pixels; ++i) {
 			auto p = pixels565[i];
-			pixelsout[i] = { table5[p.b], table6[p.g], table5[p.r], 255 };
+			pixelsout[i] = { table5[p.r], table6[p.g], table5[p.b], 255 };
 		}
 		input.swap(output);
 		break;
@@ -259,7 +242,6 @@ auto WzBitmap::data() ->std::vector<uint8_t>
 		//input.swap(output);
 		break;
 	default:
-		//std::cerr << "Unknown image format1 of" << std::dec << f1 << std::endl;
 		throw std::runtime_error("Unknown image type!");
 	}
 	switch (format2) {
@@ -275,56 +257,9 @@ auto WzBitmap::data() ->std::vector<uint8_t>
 		//std::cerr << "Unknown image format2 of" << std::dec << static_cast<unsigned>(f2) << std::endl;
 		throw std::runtime_error("Unknown image type!");
 	}
-
 	delete[] original;
 	output.clear();
 	return input;
 }
 
 
-auto WzBitmap::render(byte *pixels) -> byte *
-{
-	byte *o = nullptr;
-	switch (format)
-	{
-	case 0x0001:
-		o = new byte[this->deCompressLen * 2];
-		for (int index = 0, pointer = 0; index < deCompressLen; index += 2)
-		{
-			int num9 = pixels[index] & 15;
-			num9 = num9 | (num9 << 4);//B
-			int num8 = pixels[index] & 240;
-			num8 = num8 | (num8 >> 4);//G
-			int num7 = pixels[index + 1] & 15;
-			num7 = num7 | (num7 << 4);//R
-			int num6 = pixels[index + 1] & 240;
-			num6 = num6 | (num6 >> 4);//A
-									  //RGBA
-			o[pointer++] = num7;
-			o[pointer++] = num8;
-			o[pointer++] = num9;
-			o[pointer++] = num6;
-
-		}
-		break;
-	case 0x0002://BGRA ==> RGBA
-		o = new byte[deCompressLen];
-		memcpy(o, pixels, deCompressLen);
-		break;
-	case 0x0201:
-		o = new byte[this->deCompressLen * 2];
-		for (int index = 0, pointer = 0; index < deCompressLen;)
-		{
-			o[pointer++] = ((pixels[index] & 0x1F) >> 0x02) + (pixels[index] << 0x03);//B
-			o[pointer++] = (((pixels[index] & 0xE0) >> 0x03) | (pixels[++index] << 0x05)) + ((pixels[index] & 0x07) >> 0x01);//G
-			o[pointer++] = (pixels[index] & 0xF8) + (pixels[index]++ >> 0x05);//R
-			o[pointer++] = 0xFF;//A
-		}
-		break;
-	default:
-		delete[]pixels;
-		return o;
-	}
-
-	return o;
-}

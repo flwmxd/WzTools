@@ -1,3 +1,21 @@
+//////////////////////////////////////////////////////////////////////////////
+// This file is part of the PharaohStroy MMORPG client                      // 
+// Copyright ?2016-2017 Prime Zeng                                          // 
+//                                                                          // 
+// This program is free software: you can redistribute it and/or modify     // 
+// it under the terms of the GNU Affero General Public License as           // 
+// published by the Free Software Foundation, either version 3 of the       // 
+// License, or (at your option) any later version.                          // 
+//                                                                          // 
+// This program is distributed in the hope that it will be useful,          // 
+// but WITHOUT ANY WARRANTY; without even the implied warranty of           // 
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the            // 
+// GNU Affero General Public License for more details.                      // 
+//                                                                          // 
+// You should have received a copy of the GNU Affero General Public License // 
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.    // 
+////////////////////////////////////////////////////////////////////////////// 
+
 #pragma once
 #include <iostream>
 #include <string>
@@ -5,29 +23,39 @@
 #ifdef _WIN32
 
 #endif // _WIN32
-#include <codecvt>
+//#include <codecvt>
 #include "WzTools.h"
 class WzReader
 {
 	struct WzHeader {
-		int eod ;// end of directory
-		int size = 0;
-		int versions[50] = {0};
-		unsigned int factors[50] = { 0 };
-		int conclusion = -1;
+		int32_t eod ;// end of directory
+		int32_t size = 0;
+		int32_t versions[50] = {0};
+		uint32_t factors[50] = { 0 };
+		int32_t conclusion = -1;
 	};
 
 public:
 	WzReader();
-	WzReader(std::string path);
-	WzReader(const WzReader &reader) = default;
+	WzReader(const std::string &path);
+	WzReader(const WzReader &reader) = delete;
+	WzReader &operator=(const WzReader & reader) = delete;
 	~WzReader();
 	auto readNullTerminatedString() -> std::string;
-	auto transitString(int offset) ->std::string;
+	auto transitString(int64_t offset) ->std::string;
 	auto readDecryptString()->std::string;
-	auto readDecryptString(int offset)->std::string;
+	auto readDecryptString(int64_t offset)->std::string;
+	auto readBin(int32_t size) -> void*;
+
 	template <typename T>
-	auto read()->T;
+	auto read()->T 
+	{
+		T v;
+		fread(&v, sizeof(T), 1, file);
+		pos += sizeof(T);
+		return v;
+		//return *(T*)(readBin(sizeof(T)));
+	}
 	auto readByte()->byte;
 	auto readShort() -> int16_t;
 	auto readUShort()-> uint16_t;
@@ -51,7 +79,7 @@ public:
 	auto convertString(std::u16string const & p_str)->std::string;
 public:
 	//header methods
-	auto valid() -> bool;//��֤
+	auto valid() -> bool;//
 	auto getVersion() -> int;
 	auto computeOffset() -> int;
 	WzHeader header;
@@ -63,6 +91,10 @@ private:
 	FILE * file;
 	uint64_t pos;
 	std::string path;
+
+	char * base;
+	char * off;
+
 private:
 	//KMS
 	byte cryptok[0xffff];
@@ -77,8 +109,5 @@ public:
 	static byte factorg[];
 	static byte factork[];
 	static byte key[];
-	char16_t const * u16key = nullptr;
-	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>, wchar_t> convert;
-
 };
 

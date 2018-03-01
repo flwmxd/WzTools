@@ -1,3 +1,21 @@
+//////////////////////////////////////////////////////////////////////////////
+// This file is part of the PharaohStroy MMORPG client                      // 
+// Copyright ?2016-2017 Prime Zeng                                          // 
+//                                                                          // 
+// This program is free software: you can redistribute it and/or modify     // 
+// it under the terms of the GNU Affero General Public License as           // 
+// published by the Free Software Foundation, either version 3 of the       // 
+// License, or (at your option) any later version.                          // 
+//                                                                          // 
+// This program is distributed in the hope that it will be useful,          // 
+// but WITHOUT ANY WARRANTY; without even the implied warranty of           // 
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the            // 
+// GNU Affero General Public License for more details.                      // 
+//                                                                          // 
+// You should have received a copy of the GNU Affero General Public License // 
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.    // 
+////////////////////////////////////////////////////////////////////////////// 
+
 #include "WzNode.h"
 #include "WzBitmap.h"
 #include "WzAudio.h"
@@ -14,7 +32,7 @@ WzNode::WzNode(const std::shared_ptr<WzReader> &reader) :nodeType(NodeType::NONE
 {
 	this->reader = reader;
 	chSize = 0;
-
+	offset = 0;
 }
 
 
@@ -23,23 +41,44 @@ WzNode::WzNode(const std::shared_ptr<WzReader> &reader, WzNode *node) :parent(no
 {
 	this->reader = reader;
 	chSize = 0;
+	offset = 0;
 }
 
-auto WzNode::operator==(WzNode const &) const -> bool
+auto WzNode::operator==(WzNode const & a) const -> bool
 {
-	return false;
+	return this->identity == a.identity;
 }
 
-
-auto WzNode::operator!=(WzNode const &) const -> bool
+auto WzNode::load(const std::shared_ptr<WzReader>& reader) -> void
 {
-	return false;
+	parent = nullptr;
+	nodeType = NodeType::NONE;
+	this->reader = reader;
+	chSize = 0;
+	offset = 0;
+	root();
 }
 
-auto WzNode::operator<(WzNode const &) const -> bool
+auto WzNode::begin() ->WzNodes::iterator
 {
-	return false;
+	if (children.size() == 0 && chSize == 0 && offset != 0) {
+		tryExpand();
+	}
+	return children.begin();
 }
+
+auto WzNode::end() ->WzNodes::iterator
+{
+	return children.end();
+}
+
+
+auto WzNode::operator!=(WzNode const & a) const -> bool
+{
+	return this->identity != a.identity;
+}
+
+
 
 auto WzNode::operator[](unsigned int n)  -> WzNode&
 {
@@ -173,15 +212,20 @@ auto WzNode::getBitmap() const -> WzBitmap
 	return WzBitmap(data.bitmap.height, data.bitmap.width, data.bitmap.length, data.bitmap.offset, data.bitmap.format, data.bitmap.format2, reader);
 }
 
-auto WzNode::getAudio() const -> WzAudio
+auto WzNode::getAudio() -> WzAudio
 {
-	return WzAudio();
+	return WzAudio(this->reader,data.audio.offset,data.audio.length,data.audio.header);
 }
 
 
 auto WzNode::getBoolean(bool def) const -> bool
 {
-	return (data.use && nodeType == NodeType::INTEGER) ? getInteger() ? true : false : def;
+	return (data.use && nodeType == NodeType::INTEGER) ? (getInteger() == 1 ? true : false) : def;
+}
+
+auto WzNode::getChildrenSize() ->int32_t
+{
+	return chSize;
 }
 
 auto WzNode::x() const -> int32_t
@@ -217,8 +261,9 @@ auto WzNode::root()-> WzNode&
 
 auto WzNode::expandRoot(std::string name) -> bool
 {
-	std::vector<WzNode> nodes;
-	for (int count = reader->upackInt(); count > 0; --count)
+	std::list<WzNode> nodes;
+	chSize = reader->upackInt();
+	for (int count = chSize; count > 0; --count)
 	{
 		std::string identity = "";
 		byte type = reader->readByte();
@@ -236,24 +281,32 @@ auto WzNode::expandRoot(std::string name) -> bool
 			return false;
 		}
 		//下一个节点的位置;
-		//本节点是从header.length+2开始读取
-		int size = reader->upackInt();
-		int sum32 = reader->upackInt();
-		int offset = reader->computeOffset();
-		WzNode node(reader, this);
+		//本节点是从header.length+2开始读�?
+		int32_t size = reader->upackInt();
+		int32_t sum32 = reader->upackInt();
+		int32_t offset = reader->computeOffset();
+	
+		nodes.emplace_back(WzNode(reader, this ));
+		WzNode & node = nodes.back();
 		node.identity = identity;
 		node.type = type;
 		node.size = size;
 		node.sum32 = sum32;
 		node.offset = offset;
-		nodes.emplace_back(node);
-		
 	}
 	for (auto &a : nodes) {
-		if (0 != a.type % 2) {//folder
-			a.expandRoot(a.identity);
+
+		std::string &name = a.identity;
+
+		if (0 != a.type % 2) 
+		{//folder
+			//a.;
+			children.emplace(name, std::move(a)).first->second.expandRoot(a.identity);
 		}
-		children.emplace(a.identity, a);//children[a.identity] = a;// std::move(a);
+		else 
+		{
+			children.emplace(name, std::move(a));
+		}
 	}
 	return true;
 }
@@ -299,30 +352,37 @@ auto WzNode::expandShape2dVector2D(int64_t offset)  -> bool
 
 auto WzNode::expandSoundDx8(int64_t offset, int64_t eob)  -> bool
 {
-	int unknow = reader->readByte();
-	int size = reader->upackInt();
+	int unknow = reader->readByte();// Always 0
+	int size = reader->upackInt(); //+ 82u;//?
 	int unknow1 = reader->upackInt();
 	reader->setPosition(reader->getPosition() + 51);
 	nodeType = NodeType::AUDIO;
 	data.use = true;
-	data.audio.offset = eob - size;
+	data.audio.offset = static_cast<uint32_t>(eob - size);
 	data.audio.length = size;
-	//prop->data = new WzSound(unknow, size, unknow1, eob - size, reader->readByte(), reader);
+	data.audio.header = reader->readByte();
 	reader->setPosition(eob);
 	return true;
 }
 
 auto WzNode::expandProperty(int64_t offset)  -> bool
 {
-	int unknow = reader->readShort();
+	reader->readShort();
 	int count = reader->upackInt();
 	chSize = count;
-	for (int index = 0; index < count; index++) {
+	for (int index = 0; index < count; ++index) {
 		std::string identity = reader->transitString(offset);
-		int type = reader->readByte();
+		byte type = reader->readByte();
 		int64_t position = reader->getPosition();
-		WzNode n(reader, this);
+		//WzNode n(reader, this);
+		//TODO 闪退的bug
+		WzNode & n = children.emplace(identity, 
+			WzNode(reader,this)
+		).first->second;
 		n.data.use = true;
+		n.identity = identity;
+		n.offset = position;
+
 		switch (type)
 		{
 		case 0x00:
@@ -333,6 +393,7 @@ auto WzNode::expandProperty(int64_t offset)  -> bool
 		case 0x0b:
 			n.nodeType = NodeType::INTEGER;
 			n.data.ireal = reader->readShort();
+			break;
 		case 0x03:
 		case 0x13:
 			n.nodeType = NodeType::INTEGER;
@@ -360,12 +421,9 @@ auto WzNode::expandProperty(int64_t offset)  -> bool
 			int read = reader->readInt();
 			int64_t eob = read + reader->getPosition();
 			n.expandNode(offset, eob);
-			reader->setPosition(eob);
+			reader->setPosition(eob);//还原位置;
 			break;
 		}
-		n.identity = identity;
-		n.offset = position;
-		children.emplace(identity, n);
 	}
 	return true;
 }
@@ -379,20 +437,18 @@ auto WzNode::expandCanvas(int64_t offset)  -> bool
 		if (!expandProperty(offset))
 			return false;
 
-	int width = reader->upackInt();
-	int height = reader->upackInt();
-	//这句话 有点问题  不知道是这种表示 还是 reader->readByte()+ reader->upackInt()
-	//int format = reader->upackInt() + reader->readByte();
-	int format = reader->upackInt();
-	int f2 = reader->readByte();
-
-	int reserved = reader->readInt();//没用
-	int size = reader->readInt();
+	int32_t width = reader->upackInt();
+	int32_t height = reader->upackInt();
+	int32_t format = reader->upackInt();
+	int32_t f2 = reader->readByte();
+	int32_t reserved = reader->readInt();//没用
+	int32_t size = reader->readInt();
 	int64_t offset2 = reader->getPosition();
+
 	nodeType = NodeType::BITMAP;
 	data.use = true;
 	data.bitmap.length = size;
-	data.bitmap.offset = offset2;
+	data.bitmap.offset = static_cast<uint32_t>(offset2);
 	data.bitmap.format = format;
 	data.bitmap.format2 = f2;
 	data.bitmap.width = width;
@@ -421,12 +477,12 @@ auto WzNode::expandUol(int64_t offset)  -> bool
 				break;
 			}
 		}
-		data.ireal = n->offset;//拿到根节点的偏移量;
+		data.ireal = n->offset;//拿到根节点的偏移�?
 	}
 	return true;
 }
 
-auto WzNode::resolve(const std::string & path) -> WzNode &
+auto WzNode::resolve(const char* path) -> WzNode &
 {
 	int64_t currentOffset = reader->getPosition();
 	std::vector<std::string> arrays;
@@ -443,49 +499,10 @@ auto WzNode::resolve(const std::string & path) -> WzNode &
 		n = &n->getChild(part.c_str());
 	}
 	reader->setPosition(currentOffset);
+
 	return *n;
 }
-
-/*
-auto WzNode::resolve(const char * path) -> WzNode &
-{
-	
-}*/
-
-/*
-auto WzNode::resolve(WzNode &node) ->void
-{
-	std::vector<std::string> arrays;
-	WzTools::split(node.data.str, arrays, "/", true);
-	std::vector<std::string> a2;
-	for (auto & str : arrays)
-	{
-		if (str != "..") {
-			a2.push_back(str);
-		}
-	}
-	int64_t currentOffset = reader->getPosition();
-	
-	WzNode *root = new WzNode(reader);
-	WzNode *orin = root;
-	root->offset = node.data.ireal;//根节点的偏移;
-	reader->setPosition(root->offset);
-	int i = 0;
-	for (auto & s : a2)
-	{
-		root = &root->getChild(s.c_str());
-	}
-	node.nodeType = root->nodeType;
-	node.data = root->data;
-	node.offset = root->offset;
-
-	delete orin;
-
-	reader->setPosition(currentOffset);
-
-}*/
-
-auto WzNode::resolve() ->void
+auto WzNode::resolve(bool expandZero) ->WzNode &
 {
 	std::vector<std::string> arrays;
 	WzTools::split(data.str, arrays, "/", true);
@@ -508,25 +525,43 @@ auto WzNode::resolve() ->void
 		root = &root->getChild(s.c_str());
 	}
 
+	if (root->nodeType == NodeType::NONE && expandZero)
+	{
+		root = &root->getChild("0");
+	}
+
 	nodeType = root->nodeType;
 	data = root->data;
 	offset = root->offset;
 	parent = root->parent;
 	identity = root->identity;
-//	chSize = root->chSize;
+	chSize = root->chSize;
 	type = root->type;
 //	size = root->size;
 	children = root->children;
-
-	
-
-
 	reader->setPosition(offset);
+	return *this;
 }
+
 
 auto WzNode::setNodeType(NodeType type) -> void
 {
 	this->nodeType = type;
+}
+
+auto WzNode::getNodeType() ->NodeType
+{
+	return nodeType;
+}
+
+auto WzNode::getParent() -> WzNode *
+{
+	return parent;
+}
+
+auto WzNode::setParent(WzNode * parent) -> void
+{
+	this->parent = parent;
 }
 
 auto WzNode::probeRegion() -> bool
@@ -544,8 +579,8 @@ auto WzNode::probeRegion() -> bool
 
 auto WzNode::queryIdentity() -> std::string
 {
-	int children = 0;
-	for (int count = reader->upackInt(); count > 0; --count)
+	int32_t children = 0;
+	for (int32_t count = reader->upackInt(); count > 0; --count)
 	{
 		switch (reader->readByte())
 		{
@@ -581,27 +616,24 @@ auto WzNode::queryIdentity() -> std::string
 
 auto WzNode::getChild(const char * name) -> WzNode&
 {
-	try
+
+	auto iter = children.find(name);
+	auto resolveNode = [&](WzNode & node) -> WzNode&
 	{
-		WzNode & node = children.at(name);
 		node.parent = this;
 		if (node.nodeType == WzNode::NodeType::UOL) {
 			node.resolve();
 		}
 		return node;
-	}
-	catch (const std::exception&)
-	{
+	};
+	if (iter == children.end()) {
 		tryExpand();
+		return resolveNode(children[name]);
 	}
-	WzNode & node = children[name];
-	node.parent = this;
-	if(node.nodeType == WzNode::NodeType::UOL){
-		node.resolve();
-	}
-	return node;
+	return resolveNode(iter->second);
 }
-auto WzNode::find(const std::string & name) ->std::map<std::string, WzNode>::iterator
+
+auto WzNode::find(const std::string & name) ->WzNodes::iterator
 {
 	if (this->children.size() == 0) {
 		tryExpand();
@@ -610,11 +642,15 @@ auto WzNode::find(const std::string & name) ->std::map<std::string, WzNode>::ite
 }
 auto WzNode::tryExpand() ->void
 {
+	if (reader == nullptr) 
+	{
+		return;
+	}
 	reader->setPosition(offset);
 	expandNode(offset, 0);
 }
 
-auto WzNode::getChildren(bool expand) ->std::map<std::string, WzNode>&
+auto WzNode::getChildren(bool expand) ->WzNodes&
 {
 	if (expand) {
 		if (this->children.size() == 0) {
@@ -639,7 +675,12 @@ auto WzNode::clear() ->void
 	this->children.clear();
 }
 
-auto WzNode::computeEod() -> int
+auto WzNode::exist(const std::string & name) -> bool
+{
+	return find(name) != end();
+}
+
+auto WzNode::computeEod() -> int32_t
 {
 	int children = 0;
 	for (int count = reader->upackInt(); count > 0; --count)
@@ -663,48 +704,24 @@ auto WzNode::computeEod() -> int
 }
 
 
-std::string operator+(std::string s, WzNode & node)
+auto operator+(std::string s, WzNode & node) -> std::string
 {
 	return s + node.getString();
 }
 
-std::string operator+(char const * s, WzNode& node)
+auto operator+(char const * s, WzNode& node) -> std::string
 {
 	return s + node.getString();
 }
 
-std::string operator+(WzNode&node, std::string s)
+auto operator+(WzNode&node, std::string s)-> std::string
 {
 	return node.getString() + s;
 }
 
-std::string operator+(WzNode &node, char const *s)
+auto operator+(WzNode &node, char const *s)-> std::string
 {
 	return node.getString() + s;
-}
-
-auto WzNode::operator()(signed long n) -> WzNode
-{
-	return operator()(std::to_string(n));
-}
-
-auto WzNode::operator()(unsigned long long value) -> WzNode
-{
-	return operator()(std::to_string(value));
-}
-
-auto WzNode::operator()(signed long long value) -> WzNode
-{
-	return operator()(std::to_string(value));
-}
-
-auto WzNode::operator()(std::string const &name) -> WzNode
-{
-	return operator()(name.c_str());
-}
-auto WzNode::operator()(WzNode & node) -> WzNode
-{
-	return operator()(node.identity);
 }
 
 WzNode::operator unsigned char() const {
@@ -755,35 +772,7 @@ WzNode::operator WzBitmap() const
 {
 	return WzBitmap(data.bitmap.height, data.bitmap.width, data.bitmap.length, data.bitmap.offset, data.bitmap.format, data.bitmap.format2, reader);
 }
-WzNode::operator WzAudio() const
+WzNode::operator WzAudio() 
 {
-	return WzAudio();
+	return getAudio();
 }
-auto WzNode::operator()(unsigned int n) -> WzNode
-{
-	return operator()(std::to_string(n));
-}
-
-auto WzNode::operator()(signed int n) -> WzNode
-{
-	return operator()(std::to_string(n));
-}
-
-auto WzNode::operator()(unsigned long n) -> WzNode
-{
-	return operator()(std::to_string(n));
-}
-auto WzNode::operator()(char const * name) -> WzNode
-{
-	WzNode & node = getChild(name);
-	if (node.reader.get() == nullptr) {
-		node.reader = reader;
-	}
-	
-	if (node.nodeType == NodeType::UOL) {
-		resolve(node);
-	}
-
-	return node;
-}
-

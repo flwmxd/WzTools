@@ -1,4 +1,22 @@
-﻿#include "WzReader.h"
+//////////////////////////////////////////////////////////////////////////////
+// This file is part of the PharaohStroy MMORPG client                      // 
+// Copyright ?2016-2017 Prime Zeng                                          // 
+//                                                                          // 
+// This program is free software: you can redistribute it and/or modify     // 
+// it under the terms of the GNU Affero General Public License as           // 
+// published by the Free Software Foundation, either version 3 of the       // 
+// License, or (at your option) any later version.                          // 
+//                                                                          // 
+// This program is distributed in the hope that it will be useful,          // 
+// but WITHOUT ANY WARRANTY; without even the implied warranty of           // 
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the            // 
+// GNU Affero General Public License for more details.                      // 
+//                                                                          // 
+// You should have received a copy of the GNU Affero General Public License // 
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.    // 
+////////////////////////////////////////////////////////////////////////////// 
+
+#include "WzReader.h"
 #include "../Others/Console.h"
 #include "WzKey.h"
 #include <locale.h>
@@ -7,6 +25,11 @@
 #include <iostream>
 #include "../Others/StringUtils.h"
 #include <cmath>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 //KMS EMS 
 byte WzReader::factork[] = { 0x4D, 0x23, 0xC7, 0x2B };
 //GMS
@@ -25,17 +48,54 @@ WzReader::WzReader() :length(0), file(nullptr), pos(0)
 }
 
 
-WzReader::WzReader(std::string p):path(p) , length(0), file(nullptr), pos(0)
+WzReader::WzReader(const std::string & p):path(p) , length(0), file(nullptr), pos(0)
 {
+
+
 	file = fopen(path.c_str(), "rb");
 	if (file == nullptr) {
-		Log("fail to open this file");
+		Log("fail to open this file : %s", p.c_str());
 		exit(0);
 	}
-	fseek(file, 0, SEEK_END); 
-	length = ftell(file);    
+	fseek(file, 0, SEEK_END);
+	length = ftell(file);
 	fseek(file, 0, SEEK_SET);
-	u16key = reinterpret_cast<char16_t const *>(WzKey::emsWzKey);
+
+	
+/*
+
+	HANDLE file = CreateFileA(p.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+	if (file == INVALID_HANDLE_VALUE)
+	{
+		Log("error file ");
+		return;
+	}
+
+	HANDLE map = CreateFileMappingA(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+	if (!map)
+	{
+		Log("can`t create mapping ");
+		return;
+	}
+
+//	int32_t offset = 64 * 1024;
+	auto size= GetFileSize(file, nullptr);
+	base = reinterpret_cast<char *>(MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0));
+	if (!base)
+	{
+		auto a = GetLastError();
+		throw;
+		Log("can`t map view");
+		return;
+	}
+
+	off = base;
+
+
+*/
+
+
+
 }
 
 
@@ -57,32 +117,33 @@ auto WzReader::readNullTerminatedString() -> std::string
 	return str;
 }
 
-auto WzReader::transitString(int offset) -> std::string
+auto WzReader::transitString(int64_t offset) -> std::string
 {
-	switch (read<byte>())
+	auto a = readByte();
+	switch (a)
 	{
-	case 0x04: setPosition(pos + 8); break;
 	case 0x00:
 	case 0x73: return readDecryptString();
 	case 0x01:
 	case 0x1b: return readDecryptString(offset + read<int32_t>());
+//	default: throw std::runtime_error("Unknown property string type: " + std::to_string(a));
 	}
 	return "";
 }
 
 auto WzReader::readDecryptString() -> std::string
 {
-	char size = read<char>();
-	if (0 < size) {
+	auto size = read<int8_t>();
+	if (size > 0) {
 		//Unicode
 		auto slen = size == 127 ? read<uint32_t>() : size;
-		//auto slen = size == -128 ? read<uint32_t>() : -size;
 		byte * b = readBytes(slen * 2);
 		std::string s = decryptUnicodeString(b, slen * 2);
 		delete[]b;
 		return s;
 	}
-	if (0 > size) {
+
+	if (size<0) {
 		//ASCII
 		auto slen = size == -128 ? read<uint32_t>() : -size;
 		byte * b = readBytes(slen);
@@ -91,6 +152,7 @@ auto WzReader::readDecryptString() -> std::string
 		return s;
 	}
 	
+
 	return "";
 }
 
@@ -99,21 +161,26 @@ auto WzReader::decryptAsciiString(byte * bytes, int len) -> std::string
 {
 
 	std::string s;
+	s.resize(len);
 	byte factor = 0xaa;//170
 	for (int index = 0; index < len; ++index, ++factor) {
-		s += (char)(bytes[index] ^ WzKey::emsWzKey[index] ^ factor);
+		s [index] = (char)(bytes[index] ^ WzKey::emsWzKey[index] ^ factor);
 	}
 	return s;
 }
 
 auto WzReader::decryptUnicodeString(byte * bytes, int len) -> std::string
 {
+
 	std::u16string s;
 	int factor = 0xaaaa;
 	for (int index = 0; index < len; index = index + 2, ++factor) {
-		s += ((char16_t)(((bytes[index + 1] ^ WzKey::emsWzKey[index + 1] ^ (factor >> 0x08)) << 0x08) + (bytes[index] ^ WzKey::emsWzKey[index] ^ (factor & 0xff))));
+		char16_t c = ((char16_t)(((bytes[index + 1] ^ WzKey::emsWzKey[index + 1] ^ (factor >> 0x08)) << 0x08) + (bytes[index] ^ WzKey::emsWzKey[index] ^ (factor & 0xff))));
+		s.append(1,c);
 	}
-	return convertString(s);
+	std::string oout;
+	StringUtils::UTF16ToUTF8(s, oout);
+	return oout;
 }
 
 auto WzReader::convertString(std::u16string const & ws) -> std::string{
@@ -195,7 +262,7 @@ auto WzReader::computeOffset(unsigned int offset, unsigned int factor, unsigned 
 	return (((offset << (int)factor) | (offset >> (0x20 - (int)factor))) ^ value) + 0x78;
 }
 
-auto WzReader::readDecryptString(int offset) -> std::string
+auto WzReader::readDecryptString(int64_t offset) -> std::string
 {
 	uint64_t currentPos = getPosition();
 	setPosition(offset);
@@ -204,31 +271,33 @@ auto WzReader::readDecryptString(int offset) -> std::string
 	return result;
 }
 
+auto WzReader::readBin(int32_t size) -> void *
+{
+	void *a = off;
+	off += size;
+	pos += size;
+	return a;
+}
+
 
 auto WzReader::readBytes(int length) -> byte *
 {
+
 	byte * array = new byte[length];
 	fread(array, sizeof(byte)*length, 1, file);
 	pos += sizeof(byte)*length;
 	return array;
+
+	//return (byte*)readBin(length);
 }
 
 auto WzReader::upackInt() -> int32_t
 {
-	char value = read<char>();
+	int8_t value = read<int8_t>();
 	if (-128 == value)
 		return read<int32_t>();
 	return value;
 }
-template <typename T>
-auto WzReader::read() ->T
-{
-	T v;
-	fread(&v, sizeof(T), 1, file);
-	pos += sizeof(T);
-	return v;
-}
-
 
 
 auto WzReader::readByte() ->byte
@@ -260,7 +329,7 @@ auto WzReader::readDouble() ->double
 
 auto WzReader::upackFloat() -> float
 {
-	char value = read<char>();
+	int8_t value = read<int8_t>();
 	if (-128 == value)
 		return read<float>();
 	return value;
@@ -268,7 +337,7 @@ auto WzReader::upackFloat() -> float
 
 auto WzReader::upackLong() -> int64_t
 {
-	char value = read<char>();
+	int8_t value = read<int8_t>();
 
 	if (-128 == value)
 		return read<int64_t>();
@@ -288,9 +357,13 @@ auto WzReader::getLength() -> int64_t const
 auto WzReader::setPosition(int64_t position) -> void
 {
 	this->pos = position;
+	//off = base + position;
+
 	if (fseek(file, (long)position, SEEK_SET) == -1) {
 		//throw std::out_of_range("OutOfFileSizeException");
 	}
+
+	
 }
 
 auto WzReader::getPosition() -> int64_t const
