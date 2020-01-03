@@ -18,7 +18,7 @@ WzNode node = WzFiles::character["Hair"]["0000000.img"]["info"].
 ### ensure you have installed cmake
 
 ```
-1. use build.sh to buid 
+1. use build.sh to build 
 ```
 
 or 
