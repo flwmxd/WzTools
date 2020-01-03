@@ -20,12 +20,9 @@
 #include "WzBitmap.h"
 #include "WzAudio.h"
 #include "WzReader.h"
-#include "../Others/Console.h"
 #include <vector>
 #include <sstream>
 #include "WzTools.h"
-
-
 
 
 WzNode::WzNode(const std::shared_ptr<WzReader> &reader) :nodeType(NodeType::NONE), parent(nullptr)
@@ -281,7 +278,7 @@ auto WzNode::expandRoot(std::string name) -> bool
 			return false;
 		}
 		//下一个节点的位置;
-		//本节点是从header.length+2开始读�?
+		//本节点是从header.length+2开始读�?
 		int32_t size = reader->upackInt();
 		int32_t sum32 = reader->upackInt();
 		int32_t offset = reader->computeOffset();
@@ -375,7 +372,7 @@ auto WzNode::expandProperty(int64_t offset)  -> bool
 		byte type = reader->readByte();
 		int64_t position = reader->getPosition();
 		//WzNode n(reader, this);
-		//TODO 闪退的bug
+		//TODO crash?
 		WzNode & n = children.emplace(identity, 
 			WzNode(reader,this)
 		).first->second;
@@ -477,7 +474,7 @@ auto WzNode::expandUol(int64_t offset)  -> bool
 				break;
 			}
 		}
-		data.ireal = n->offset;//拿到根节点的偏移�?
+		data.ireal = n->offset;//拿到根节点的偏移�?
 	}
 	return true;
 }

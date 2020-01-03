@@ -12,3 +12,17 @@ you can use it by this
 ```
 WzNode node = WzFiles::character["Hair"]["0000000.img"]["info"].
 ```
+
+# Build 
+
+### ensure you have installed cmake
+
+```
+1. use build.sh to buid 
+```
+
+or 
+
+```
+2. cmake && make
+```

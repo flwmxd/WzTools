@@ -19,3 +19,4 @@
 #pragma once
 #include "WzFile.h"
 #include "WzAudio.h"
+#include "WzBitmap.h"

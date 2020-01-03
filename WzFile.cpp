@@ -18,13 +18,10 @@
 
 #include "WzFile.h"
 #include "WzNode.h"
-#include "../Others/Console.h"
-#include "../Others/Timer.h"
 namespace WzFile {
 	WzNode base, character,  effect, etc, item, map, mob, morph, npc, quest, reactor, skill, sound, string, tamingmob, ui;
 	auto loadAll(const std::string &path) -> void
 	{
-		Log("Begin to read Wz Files");
 		base.load(std::make_shared<WzReader>(path+"Base.wz"));
 		character.load(std::make_shared<WzReader>(path+"Character.wz"));
 		effect.load(std::make_shared<WzReader>(path+"Effect.wz"));
@@ -41,6 +38,5 @@ namespace WzFile {
 		string.load(std::make_shared<WzReader>(path+"String.wz"));
 		tamingmob.load(std::make_shared<WzReader>(path+"TamingMob.wz"));
 		ui.load(std::make_shared<WzReader>(path+"UI.wz"));
-		Log("WZ read over");
 	}
 }

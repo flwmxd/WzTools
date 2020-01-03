@@ -24,8 +24,6 @@
 #include <unordered_map>
 #include <list>
 #include <map>
-#define WZ_LAZY_LOAD true
-
 
 
 class WzNode
@@ -105,7 +103,7 @@ public:
 	auto expandRoot(std::string name) -> bool;
 	auto tryExpand()->void;
 	auto getChildren(bool expand = true)->WzNodes&;
-	//³¢ÊÔÕ¹¿ª½Úµã;
+	//ï¿½ï¿½ï¿½ï¿½Õ¹ï¿½ï¿½ï¿½Úµï¿½;
 	auto childrenSize() -> int;
 	auto clear() ->void;
 	auto exist(const std::string &name)->bool;
