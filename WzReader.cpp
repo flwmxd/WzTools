@@ -24,6 +24,8 @@
 #include <iostream>
 #include <cmath>
 #include <limits.h>
+#include "SimdChecker.h"
+#include "WzKey.h"
 
 #ifdef _WIN32
 # include <windows.h>
@@ -147,7 +149,7 @@ auto WzReader::readDecryptString() -> std::string {
             return "";
         }
         auto b = readBytes(slen * 2);
-        std::string s = decryptUnicodeString(b, slen * 2);
+        std::string s = decryptUnicodeString(b.get(), slen * 2);
         return s;
     }
 
@@ -158,47 +160,143 @@ auto WzReader::readDecryptString() -> std::string {
             return "";
         }
         auto b = readBytes(slen);
-        std::string s = decryptAsciiString(b, slen);
+        std::string s = decryptAsciiString(b.get(), slen);
         return s;
     }
     return "";
 }
 
-auto WzReader::decryptAsciiString(std::unique_ptr<int8_t[]> &bytes, int32_t len) -> std::string {
-    uint8_t *charBytes = reinterpret_cast<uint8_t *>(bytes.get());
+auto WzReader::decryptAsciiString(const int8_t * original, int32_t len) -> std::string {
     std::string s;
 
     if(len >= s.max_size()){
         return "";
     }
-	//TODO don't recommend to use resize because the len could be a dirty value which could cause crash
-    //s.resize(len);
-    byte factor = 0xaa; //170
-    for (int index = 0; index < len; ++index, ++factor) {
-       uint8_t c = static_cast<uint8_t>(charBytes[index] ^ WzKey::emsWzKey[index] ^ factor);
+    //如果在这里读取越界 ，那么len非常大，部分平台new的实现不一致，会引发闪退
+    //基本上出现的地图闪退都出现在这个;
+    char ns[0x10000] = {0};
+
+    if(isSimdAvailable)
+    {
+#ifdef __SSE__
+        auto m1 = reinterpret_cast<__m128i *>(ns);
+	    auto m2 = reinterpret_cast<const __m128i *>(original);
+	    auto m3 = reinterpret_cast<__m128i *>(WzKey::emsWzNormalKey);
+
+
+	    for (int i = 0; i <= len >> 4; ++i) {
+		    _mm_storeu_si128(m1 + i, _mm_xor_si128(_mm_loadu_si128(m2 + i), _mm_loadu_si128(m3 + i)));
+	    }
+
+	    ns[len] = 0;
+	    return std::string(ns, len);
+#elif defined(__ARM_NEON__)
+        auto m1 = reinterpret_cast<__m128i *>(ns);
+        auto m2 = reinterpret_cast<const __m128i *>(original);
+        auto m3 = reinterpret_cast<__m128i *>(WzKey::emsWzNormalKey);
+        
+#  if defined(__arm64__) || defined(__aarch64__) // NEON64
+        
+        for (int i = 0; i <= len >> 4; ++i) {
+            vst1q_s64((int64_t *)(m1 + i), veorq_s64(
+                    vreinterpretq_m128i_s64(vld1q_s64((const int64_t *)(m2 + i)))
+                    ,
+                    vreinterpretq_m128i_s64(vld1q_s64((const int64_t *)(m3 + i)))
+            ));
+        }
+#else //NEON
+        
+        for (int i = 0; i <= len >> 4; ++i) {
+            vst1q_s32((int32_t *)(m1 + i), veorq_s32(
+                    vreinterpretq_m128i_s32(vld1q_s32((const int32_t *)(m2 + i)))
+                    ,
+                    vreinterpretq_m128i_s32(vld1q_s32((const int32_t *)(m3 + i)))
+            ));
+        }
+#endif
+        ns[len] = 0;
+        return std::string(ns, len);
+#else
+        throw std::runtime_error("Unsupported SIMD architecture");
+
+#endif
+    }
+
+
+    uint8_t factor = 0xAA;
+
+    for (int index = 0; index < len; ++index) {
+        uint8_t c = static_cast<uint8_t>(original[index] ^ WzKey::emsWzKey[index] ^ factor++);
         if (c < 0x20 || c >= 0x80) {
             return "";
         }
-        s+=c;
+        s += c;
     }
     return s;
 }
 
-auto WzReader::decryptUnicodeString(std::unique_ptr<int8_t[]> &bytes, int32_t len) -> std::string {
-    uint8_t *charBytes = reinterpret_cast<uint8_t *>(bytes.get());
+auto WzReader::decryptUnicodeString(const int8_t * original, int32_t len) -> std::string {
     std::u16string s;
     if(len / 2 >= s.max_size()){
         return "";
     }
-    int factor = 0xaaaa;
-    for (int index = 0; index < len; index = index + 2, ++factor) {
-        char16_t c = ((char16_t) (
-                ((charBytes[index + 1] ^ WzKey::emsWzKey[index + 1] ^ (factor >> 0x08)) << 0x08) +
-                (charBytes[index] ^ WzKey::emsWzKey[index] ^ (factor & 0xff))));
-        s.append(1, c);
-    }
-    std::string oout;
-    StringUtils::UTF16ToUTF8(s, oout);
+	std::string oout;
+	if (isSimdAvailable) 
+	{
+        char16_t ws[0x8000] = { 0 };
+#ifdef __SSE__
+        auto m1 = reinterpret_cast<__m128i *>(ws);
+		auto m2 = reinterpret_cast<const __m128i *>(original);
+		auto m3 = reinterpret_cast<__m128i *>(WzKey::emsWzWideKey);
+
+		for (int i = 0; i <= len >> 3; ++i) {
+			_mm_storeu_si128(m1 + i, _mm_xor_si128(_mm_loadu_si128(m2 + i), _mm_loadu_si128(m3 + i)));
+		}
+#elif defined(__ARM_NEON__)
+        auto m1 = reinterpret_cast<__m128i *>(ws);
+        auto m2 = reinterpret_cast<const __m128i *>(original);
+        auto m3 = reinterpret_cast<__m128i *>(WzKey::emsWzWideKey);
+
+#if defined(__arm64__) || defined(__aarch64__) // NEON64
+        for (int i = 0; i <= len >> 3; ++i) {
+               //vst1q_s32((int32_t *)m1 + i, veorq_s32(m2[i], m3[i]));
+
+               vst1q_s64((int64_t *)(m1 + i), veorq_s64(
+                       vreinterpretq_m128i_s64(vld1q_s64((const int64_t *)(m2 + i)))
+                       ,
+                       vreinterpretq_m128i_s64(vld1q_s64((const int64_t *)(m3 + i)))
+               ));
+        }
+
+#else
+        
+        for (int i = 0; i <= len >> 3; ++i) {
+                vst1q_s32((int32_t *)(m1 + i), veorq_s32(
+                        vreinterpretq_m128i_s32(vld1q_s32((const int32_t *)(m2 + i)))
+                        ,
+                        vreinterpretq_m128i_s32(vld1q_s32((const int32_t *)(m3 + i)))
+                ));
+        }
+
+#endif
+
+#else
+        throw std::runtime_error("Unsupported SIMD architecture");
+#endif // _WIN32
+
+         s.append(ws, ws + len / 2);
+	}
+	else 
+	{
+		const char16_t * originalChar = reinterpret_cast<const char16_t *>(original);
+		const int16_t * wideKey = reinterpret_cast<const int16_t *>(WzKey::emsWzKey);
+		uint16_t factor = 0xAAAA;
+		for (int index = 0; index < len; index = index + 2) {
+			char16_t c2 = originalChar[index >> 1] ^ wideKey[index >> 1] ^ factor++;
+			s.append(1, c2);
+		}
+	}
+	StringUtils::UTF16ToUTF8(s, oout);
     return oout;
 }
 

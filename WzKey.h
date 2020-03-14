@@ -17,13 +17,10 @@
 ////////////////////////////////////////////////////////////////////////////// 
 
 #pragma once
-#include "WzTools.h"
-class WzKey
-{
-public:
-	static byte emsWzKey[];
-	static byte wzKey[];
-	static int getWzKeyLen();
-	static int getEmsWzKeyLen();
+#include <cstdint>
+namespace WzKey{
+	extern auto init() -> void;
+	extern uint8_t emsWzNormalKey[65536];
+	extern uint8_t emsWzWideKey[65536];
+	extern uint8_t emsWzKey[65536];
 };
-

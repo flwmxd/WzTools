@@ -20,7 +20,7 @@
 #include <zlib.h>
 #include <vector>
 #include <algorithm>
-
+#include "SimdChecker.h"
 
 uint8_t const table4[0x10] = {
 	0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
@@ -137,8 +137,68 @@ auto WzBitmap::data() -> std::vector<uint8_t>&
 			auto blen = *reinterpret_cast<uint32_t const *>(original + i);
 			i += 4;
 			if (i + blen > length) return false;
-			for (auto j = 0u; j < blen; ++j)
-				input[p + j] = static_cast<uint8_t>(original[i + j] ^ WzKey::emsWzKey[j]);
+			  
+			if (isSimdAvailable)
+			{
+#ifdef __SSE__
+				const __m128i *m2 = reinterpret_cast<const __m128i  *>(original + i);
+				__m128i	* wzKey = reinterpret_cast<__m128i *>(WzKey::emsWzKey);
+				__m128i	* out = reinterpret_cast<__m128i *>(input.data() + p);
+				auto numOf128 = blen >> 4;
+
+				for (auto j = 0u; j < numOf128; ++j)
+				{
+					_mm_storeu_si128(out + j, _mm_xor_si128(_mm_loadu_si128(m2 + j), _mm_loadu_si128(wzKey + j)));
+				}
+
+				for (auto j = numOf128 << 4; j < blen; j++)
+				{
+					input[p + j] = static_cast<uint8_t>(original[i + j] ^ WzKey::emsWzKey[j]);
+				}
+#elif defined(__ARM_NEON__)
+
+                auto m2 = reinterpret_cast<const __m128i  *>(original + i);
+                auto wzKey = reinterpret_cast<__m128i *>(WzKey::emsWzKey);
+                auto out = reinterpret_cast<__m128i *>(input.data() + p);
+                auto numOf128 = blen >> 4;
+
+#if defined(__arm64__) || defined(__aarch64__) // NEON64
+                for (auto j = 0u; j < numOf128; ++j)
+                {
+                    //out[j] = veorq_u64(m2[j], wzKey[j]);
+                    vst1q_s64((int64_t *)(out + j), veorq_s64(
+                        vreinterpretq_m128i_s64(vld1q_s64((const int64_t *)(m2 + j)))
+                        ,
+                        vreinterpretq_m128i_s64(vld1q_s64((const int64_t *)(wzKey + j)))
+                    ));
+                }
+#else
+                for (auto j = 0u; j < numOf128; ++j)
+                {
+                    //out[j] = veorq_u64(m2[j], wzKey[j]);
+                    vst1q_s32((int32_t *)(out + j), veorq_s32(
+                        vreinterpretq_m128i_s32(vld1q_s32((const int32_t *)(m2 + j)))
+                        ,
+                        vreinterpretq_m128i_s32(vld1q_s32((const int32_t *)(wzKey + j)))
+                    ));
+                }
+#endif
+
+				for (auto j = numOf128 << 4; j < blen; j++)
+				{
+					input[p + j] = static_cast<uint8_t>(original[i + j] ^ WzKey::emsWzKey[j]);
+				}
+
+#else
+				throw std::runtime_error("Unsupported SIMD architecture");
+#endif 
+			}
+			else 
+			{
+				for (auto j = 0u; j < blen; ++j)
+					input[p + j] = static_cast<uint8_t>(original[i + j] ^ WzKey::emsWzKey[j]);
+			}
+
 			i += blen;
 			p += blen;
 		}

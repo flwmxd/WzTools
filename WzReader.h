@@ -77,9 +77,9 @@ public:
 
 	auto setPosition(int64_t position) -> bool;
 	/*ASCII*/
-	auto decryptAsciiString(std::unique_ptr<int8_t[]> & bytes, int32_t len) -> std::string;
+	auto decryptAsciiString(const int8_t * bytes, int32_t len) -> std::string;
 	/*Unicode*/
-	auto decryptUnicodeString(std::unique_ptr<int8_t[]> & bytes, int32_t len) -> std::string;
+	auto decryptUnicodeString(const int8_t* bytes, int32_t len) -> std::string;
 
 	auto decryptBytes(int8_t bytes[], int32_t len) -> int8_t*;
 	auto setRegion(char c) -> void;

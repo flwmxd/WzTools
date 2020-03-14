@@ -18,14 +18,26 @@ file(GLOB WZ_SRC
     ${SRC_DIR}/*.h
 )
 
-file(GLOB Z_LIB 
-    ${LIB_DIR}/zlib/src/*.cpp
+file(GLOB ZLIB_SRC 
+	${LIB_DIR}/zlib/src/*.c
     ${LIB_DIR}/zlib/src/*.h
 )
+
+file(GLOB TEST_SRC 
+    ${SRC_DIR}/main.cpp
+)
+
 
 include_directories(
     ${LIB_DIR}/zlib/src
 )
 
-add_library(WzTools STATIC ${WZ_SRC} ${Z_LIB})
+add_library(WzTools STATIC ${WZ_SRC} ${ZLIB_SRC})
 
+set_target_properties(WzTools PROPERTIES COMPILE_FLAGS "/MP /wd4819 /arch:SSE")
+
+add_executable(Test ${TEST_SRC})
+
+target_include_directories(Test PRIVATE ${WZ_SRC})
+
+target_link_libraries(Test WzTools)
